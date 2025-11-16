@@ -1,0 +1,87 @@
+#
+# RELOADER DEPLOYMENT
+#
+# Deploys the Reloader controller which watches for changes to ConfigMaps and Secrets
+# and automatically triggers rolling updates on Deployments, StatefulSets, DaemonSets,
+# and CronJobs that reference them. This enables hot-reloading of configuration without
+# manual pod restarts.
+#
+# Key features:
+#   - Watches ConfigMaps and Secrets for changes
+#   - Triggers rolling updates on dependent workloads
+#   - Supports annotations for selective reloading
+#   - Provides metrics and health endpoints
+#   - Runs with minimal privileges using a dedicated ServiceAccount
+#
+# Overlays can adjust replica count, resource limits, and image version per environment.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reloader
+  labels:
+    app: reloader
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: reloader
+  template:
+    metadata:
+      labels:
+        app: reloader
+    spec:
+      containers:
+        # see https://github.com/stakater/Reloader/pkgs/container/reloader
+        - image: ghcr.io/stakater/reloader:v1.4.10
+          env:
+            - name: KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  divisor: '1'
+                  resource: limits.cpu
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  divisor: '1'
+                  resource: limits.memory
+          livenessProbe:
+            failureThreshold: 5
+            httpGet:
+              port: http
+              path: /live
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          name: reloader
+          ports:
+            - name: http
+              containerPort: 9090
+          readinessProbe:
+            failureThreshold: 5
+            httpGet:
+              port: http
+              path: /metrics
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 5
+          resources:
+            limits:
+              cpu: '1'
+              memory: 512Mi
+            requests:
+              cpu: 10m
+              memory: 512Mi
+          securityContext: {}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: reloader

@@ -15,6 +15,9 @@ templates for common application deployments.
 ## Components
 
 - **redis**: Redis cluster with Sentinel for high availability.
+- **reloader**: Reloader controller that automatically triggers rolling updates
+  on Deployments, StatefulSets, DaemonSets, and CronJobs when referenced
+  ConfigMaps or Secrets are updated.
 
 ## Examples
 

@@ -1,0 +1,74 @@
+#
+# RELOADER RBAC ROLE
+#
+# Defines the minimal RBAC permissions required for the Reloader controller to operate.
+# The Role grants permissions to watch ConfigMaps, Secrets, and workloads, and to update
+# them when configuration changes are detected.
+#
+# Permissions include:
+#   - Read access to ConfigMaps and Secrets for change detection
+#   - Update access to Deployments, StatefulSets, DaemonSets for rolling updates
+#   - Create access to Events for logging and Job creation for CronJob reloading
+#
+# This follows the principle of least privilege for security.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: reloader-role
+rules:
+  - apiGroups:
+      - '' # core API group
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+
+  - apiGroups:
+      - '' # core API group
+    resources:
+      - configmaps
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+
+  - apiGroups:
+      - apps
+    resources:
+      - daemonsets
+      - deployments
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+
+  - apiGroups:
+      - extensions
+    resources:
+      - daemonsets
+      - deployments
+    verbs:
+      - get
+      - list
+      - patch
+      - update
+
+  - apiGroups:
+      - batch
+    resources:
+      - cronjobs
+    verbs:
+      - get
+      - list
+
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create

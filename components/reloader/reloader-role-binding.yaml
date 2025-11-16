@@ -1,0 +1,18 @@
+#
+# RELOADER RBAC ROLEBINDING
+#
+# Binds the reloader-role to the reloader ServiceAccount, granting the necessary
+# permissions for the Reloader controller to watch and update workloads based on
+# configuration changes.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: reloader-role-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: reloader-role
+subjects:
+  - kind: ServiceAccount
+    name: reloader
