@@ -1,0 +1,33 @@
+# Redis ClusterIP Service (single master endpoint)
+#
+# Provides a single ClusterIP that targets the intended Redis master pod
+# (by default `redis-0`). This is convenient for write-heavy clients that
+# always connect to a single endpoint.
+#
+# Caveat: If a Sentinel-triggered failover promotes a different pod to
+# master, this Service will continue to route to the statically-selected
+# pod (e.g. `redis-0`) and will not automatically follow the new master.
+#
+# For clients that must always reach the actual current master, prefer one
+# of the following instead of relying on a static ClusterIP:
+#
+# - Use the headless service with a Sentinel-aware client to discover the master
+# - Use a Redis client/driver that supports Sentinel
+# - Maintain an external proxy or update Endpoints/Service via automation on failover
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  selector:
+    # Selector targets the expected master pod (pod-0) so the Service provides
+    # a single, stable master endpoint. Overlays may change this behavior.
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/role: server
+    statefulset.kubernetes.io/pod-name: redis-0
+  type: ClusterIP
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

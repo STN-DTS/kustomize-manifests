@@ -1,0 +1,47 @@
+#
+# DEV STATEFULSET PATCH
+#
+# Configures Redis for development and basic testing.
+# This patch overrides the base StatefulSet with dev-specific settings:
+#   - 3 replicas: Basic HA setup for development testing
+#   - Minimal resources: suitable for development environments
+#   - Smaller storage: 1Gi for development datasets
+#
+# Use this overlay to:
+#   - Develop and test Redis-dependent applications
+#   - Quick prototyping and experimentation
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+spec:
+  # Keep 3 replicas for basic HA testing in development
+  replicas: 3
+  template:
+    spec:
+      containers:
+        - name: redis
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      initContainers:
+        - name: init-redis
+          env:
+            - name: SENTINEL_HOST
+              value: "redis-sentinel-dev"
+            - name: REDIS_HEADLESS_SERVICE
+              value: "redis-headless-dev"
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi

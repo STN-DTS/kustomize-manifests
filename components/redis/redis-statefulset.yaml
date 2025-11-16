@@ -1,0 +1,302 @@
+#
+# Redis StatefulSet (master + replicas)
+#
+# Manages Redis pods with stable network identities (redis-0, redis-1, ...).
+# By convention `redis-0` is treated as the initial master and the init
+# container arranges replication for non-master ordinals using the stable
+# headless DNS name for the master. Sentinels handle automated failover at
+# runtime; the StatefulSet itself does not automatically reassign master
+# role in Kubernetes resources.
+#
+# Highlights:
+# - Stable pod identities and ordered scaling from StatefulSet
+# - Headless service enables per-pod DNS names needed for Redis replication
+# - Preferred pod anti-affinity spreads replicas across nodes
+# - Init container creates per-pod replication configuration using the pod name
+# - PersistentVolumeClaims provide per-pod durable storage
+# - PreStop hook triggers a save on shutdown to reduce data loss risk
+#
+# Overlays may adjust replica count, storage size, resource requests/limits,
+# or replace the init mechanism if you use an external bootstrapper.
+
+apiVersion: apps/v1
+kind: StatefulSet
+
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/role: server
+
+spec:
+  #
+  # Replica count: default 3 (1 master + 2 replicas) for basic HA.
+  #
+  replicas: 3
+
+  #
+  # POD SELECTOR: Matches pods managed by this StatefulSet.
+  #
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/role: server
+
+  #
+  # serviceName ties this StatefulSet to the headless service used for DNS.
+  # Pods will be addressable as <statefulset>-<ordinal>.<serviceName>.
+  #
+  serviceName: redis-headless
+
+  #
+  # Persistent storage template: each pod gets its own PVC named by ordinal.
+  # Adjust `storage` in overlays for production workloads.
+  #
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            # Persistent volume size: 256Mi by default.
+            storage: 256Mi
+
+  #
+  # Pod template
+  #
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/role: server
+    spec:
+      # Allow Redis time to persist data on termination before SIGKILL.
+      terminationGracePeriodSeconds: 60
+
+      # Affinity / scheduling preferences
+      #
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/role
+                      operator: In
+                      values:
+                        - server
+
+      #
+      # Pod-level security context
+      #
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 35534
+        fsGroup: 35534
+
+      #
+      # Init container prepares per-pod Redis configuration. It copies
+      # ConfigMap files into a writable directory and writes a small
+      # `redis-replication.conf` that makes non-zero ordinals replicate from
+      # the headless master address. The init container reads the pod
+      # name from the Downward API and the password from `redis-secret`.
+      #
+      initContainers:
+        - name: init-redis
+          image: docker.io/library/redis
+          command:
+            - bash
+            - -c
+            - |
+              set -eu
+
+              # 1. Prepare Configuration
+              cp /mnt/redis.conf /etc/redis/redis.conf
+              cp /mnt/redis-custom.conf /etc/redis/redis-custom.conf
+              echo "requirepass $REDIS_PASSWORD" > /etc/redis/redis-auth.conf
+
+              # 2. Identify Identity and Default Master
+              ordinal="${POD_NAME##*-}"
+              statefulset="${POD_NAME%-${ordinal}}"
+              static_master="${statefulset}-0.${REDIS_HEADLESS_SERVICE}"
+              
+              echo "Pod: $POD_NAME (Ordinal: $ordinal)"
+              echo "IP: $POD_IP"
+
+              # Default assumption: I am a replica of the static master (redis-0)
+              # Unless I am redis-0, then I assume I am master (bootstrap case).
+              master_host="$static_master"
+              if [ "$ordinal" = "0" ]; then
+                  master_host="" # I am master
+              fi
+
+              # 3. Discovery: Ask Sentinel for the *real* master
+              # We use a timeout to avoid blocking startup if Sentinel is unavailable.
+              echo "Attempting master discovery via Sentinel..."
+              if sentinel_info=$(timeout 3s redis-cli -h $SENTINEL_HOST -p 26379 --raw sentinel get-master-addr-by-name mymaster 2>/dev/null); then
+                  # Output is two lines: <ip>\n<port>
+                  reported_master_ip=$(echo "$sentinel_info" | head -n 1)
+                  
+                  if [ -n "$reported_master_ip" ]; then
+                      echo "Sentinel reports master is: $reported_master_ip"
+                      
+                      if [ "$reported_master_ip" = "$POD_IP" ]; then
+                          # Sentinel says I am the master.
+                          master_host=""
+                      elif timeout 1 bash -c "echo > /dev/tcp/$reported_master_ip/6379" 2>/dev/null; then
+                          # Sentinel says someone else is master, AND they are reachable.
+                          echo "Master $reported_master_ip is reachable."
+                          master_host="$reported_master_ip"
+                      else
+                          # Sentinel says someone else is master, but they are NOT reachable.
+                          echo "Master $reported_master_ip is unreachable (ghost). Ignoring."
+                      fi
+                  fi
+              else
+                  echo "Sentinel unreachable or silent. Falling back to static role."
+              fi
+
+              # 4. Write Replication Config
+              if [ -z "$master_host" ]; then
+                  echo "Role: MASTER"
+                  echo "# User-supplied master node" > /etc/redis/redis-replication.conf
+              else
+                  echo "Role: REPLICA of $master_host"
+                  echo "replicaof $master_host 6379" > /etc/redis/redis-replication.conf
+                  echo "masterauth $REDIS_PASSWORD" >> /etc/redis/redis-replication.conf
+              fi
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+            - name: SENTINEL_HOST
+              value: "redis-sentinel"
+            - name: REDIS_HEADLESS_SERVICE
+              value: "redis-headless"
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redis
+            - name: redis-config
+              mountPath: /mnt/redis.conf
+              subPath: redis.conf
+            - name: redis-custom-config
+              mountPath: /mnt/redis-custom.conf
+              subPath: redis-custom.conf
+
+      #
+      # Main redis container
+      #
+      containers:
+        - name: redis
+          image: docker.io/library/redis
+
+          ports:
+            - name: redis
+              containerPort: 6379
+
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+
+          command:
+            - sh
+            - -c
+            - exec redis-server /etc/redis/redis.conf
+
+          # Resource requests and limits
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          #
+          # Health checks: readiness ensures the process answers PING with auth,
+          # liveness checks the socket to detect dead processes.
+          #
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          #
+          # Lifecycle hooks
+          #
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    redis-cli -p 6379 save || true
+                    sleep 5
+
+          #
+          # Container security context
+          #
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+
+          #
+          # VOLUME MOUNTS
+          #
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/redis
+
+      #
+      # Volumes (non-PVC)
+      #
+      volumes:
+        - name: config
+          emptyDir: {}
+
+        - name: redis-config
+          configMap:
+            name: redis-config
+
+        - name: redis-custom-config
+          configMap:
+            name: redis-custom-config
+
+        - name: redis-secret
+          secret:
+            secretName: redis-secret

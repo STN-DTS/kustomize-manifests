@@ -1,0 +1,17 @@
+#
+# DEV REDIS CUSTOM CONFIG PATCH
+#
+# Configures Redis custom settings for development with reduced memory limits.
+# This patch overrides the base custom configuration with dev-specific settings:
+#   - Lower maxmemory (100Mi) to fit within development resource constraints
+#
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-custom-config
+data:
+  redis-custom.conf: |
+    # Dev: maxmemory set to 100Mi to fit within 256Mi container limit
+    # while allowing data for development
+    maxmemory 128mb

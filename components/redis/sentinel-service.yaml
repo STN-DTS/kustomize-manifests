@@ -1,0 +1,28 @@
+#
+# Redis Sentinel ClusterIP Service (client-facing)
+#
+# Provides a single ClusterIP address that clients can use to query Sentinel
+# for the current master, lists of slaves, or other Sentinel commands.
+# This is convenient for client code or tools that expect a single hostname.
+#
+# Example (from inside the cluster):
+#   redis-cli -h redis-sentinel -p 26379 sentinel masters
+#   redis-cli -h redis-sentinel -p 26379 sentinel slaves mymaster
+#
+# Caveat: The Sentinel instances still use the headless Service for
+# peer-to-peer discovery and quorum. The ClusterIP is intended for client
+# queries, not for Sentinel internal coordination.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel
+spec:
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/role: sentinel
+  type: ClusterIP
+  ports:
+    - name: sentinel
+      port: 26379
+      targetPort: sentinel

@@ -1,0 +1,55 @@
+#
+# Base Kustomization for a highly-available Redis deployment (with Sentinel)
+#
+# This kustomization defines the core resources and generated ConfigMaps
+# for running Redis with Sentinel for automatic failover. It intentionally
+# contains only base (environment-agnostic) resources — overlays should
+# supply environment-specific patches, secrets, and other customizations.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Global labels applied to all resources created by this kustomization.
+# Uses the `app.kubernetes.io/*` conventions so tools and dashboards can
+# consistently identify resources.
+labels:
+  - pairs:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/component: database
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: redis
+      app.kubernetes.io/version: 7.4.7
+
+images:
+  - name: docker.io/library/redis
+    newTag: 7.4.7-bookworm
+
+# Generate ConfigMaps from the local config files. Kustomize appends a
+# content-hash suffix to each generated ConfigMap name; when the file
+# contents change, the resulting ConfigMap name changes, which triggers
+# rolling updates for pods that reference them.
+configMapGenerator:
+  - name: redis-config
+    files:
+      - ./config/redis.conf
+  - name: redis-custom-config
+    files:
+      - ./config/redis-custom.conf
+  - name: sentinel-config
+    files:
+      - ./config/sentinel.conf
+  - name: sentinel-custom-config
+    files:
+      - ./config/sentinel-custom.conf
+
+# Base resources included in this kustomization. Overlays may add or patch
+# these resources to adjust settings (e.g., replicas, resource requests,
+# or secrets) per environment.
+resources:
+  - ./redis-secret.yaml              # Secret with Redis credentials (patched in overlays)
+  - ./redis-service-headless.yaml    # Headless Service for stable DNS per pod
+  - ./redis-service.yaml             # ClusterIP Service (typically points to Redis master)
+  - ./redis-statefulset.yaml         # StatefulSet managing Redis master/replicas
+  - ./sentinel-service-headless.yaml # Headless Service used by Sentinels for discovery
+  - ./sentinel-service.yaml          # ClusterIP Service for Sentinel clients (optional)
+  - ./sentinel-statefulset.yaml      # StatefulSet managing Sentinel instances

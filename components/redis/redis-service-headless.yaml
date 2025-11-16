@@ -1,0 +1,32 @@
+# Redis Headless Service
+#
+# Headless services (`clusterIP: None`) do not allocate a single cluster IP.
+# They provide DNS records for each backing pod, which is required for
+# StatefulSets when clients need stable pod DNS names (for example,
+# `redis-0.redis-headless`). This service supports direct pod addressing
+# and peer discovery by Sentinels.
+#
+# Typical DNS records created by Kubernetes for a StatefulSet named `redis`:
+# - `redis-0.redis-headless.<namespace>.svc.cluster.local` (pod 0)
+# - `redis-1.redis-headless.<namespace>.svc.cluster.local` (pod 1)
+# - `redis-2.redis-headless.<namespace>.svc.cluster.local` (pod 2)
+# - `redis-headless.<namespace>.svc.cluster.local` (A records for all pods)
+#
+# Use cases:
+# - Address a specific pod (master or a particular replica)
+# - Peer discovery within the Redis cluster
+# - Sentinel discovery and monitoring of individual Redis pods
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+spec:
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/role: server
+  clusterIP: None
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis

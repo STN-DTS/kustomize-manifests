@@ -1,0 +1,41 @@
+#
+# DEV OVERLAY KUSTOMIZATION
+#
+# This overlay provides a basic Redis setup for development and testing.
+# It inherits all base resources and applies dev-specific customizations:
+#   - 3 replica Redis for basic HA development testing
+#   - Single Sentinel for basic monitoring (no failover capability)
+#   - Minimal resource requests/limits for development
+#   - 1Gi persistent storage
+#   - nameSuffix "-dev" to isolate dev resources
+#   - Isolated redis-dev namespace
+#
+# Deployment:
+#   kubectl apply --kustomize examples/redis/overlays/dev/
+#
+# Cleanup:
+#   kubectl delete --kustomize examples/redis/overlays/dev/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+nameSuffix: -dev
+
+labels:
+  # It is essential for this label (or at least one unique label per environment)
+  # to be part of selectors to ensure they are applied correctly.
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/instance: dev
+
+resources:
+  # - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-7.4.7.000
+  - ../../../../components/redis
+
+# Patches override base configuration with dev-specific values.
+# Apply patches in dependency order: containers (resources) → StatefulSet → ConfigMap
+patches:
+  - path: ./redis-custom-patch.yaml
+  - path: ./redis-secret-patch.yaml
+  - path: ./sentinel-custom-patch.yaml
+  - path: ./sentinel-patch.yaml
+  - path: ./statefulset-patch.yaml

@@ -1,0 +1,215 @@
+#
+# Redis Sentinel StatefulSet
+#
+# Runs a group of Sentinel instances that monitor the Redis deployment and
+# coordinate automatic failover. Sentinels must form a quorum (majority) to
+# agree on failover actions — using an odd number of replicas (3, 5, ...) is
+# recommended for reliable decision-making.
+#
+# Highlights:
+# - Stable identities via StatefulSet (redis-sentinel-0, -1, -2)
+# - Headless service for peer discovery and internal communication
+# - Preferred pod anti-affinity to improve fault tolerance
+# - Keep replicas odd (3 recommended) so quorum = floor(N/2)+1
+#
+# Overlays may adjust replica counts, resource limits, and storage as needed.
+
+apiVersion: apps/v1
+kind: StatefulSet
+
+metadata:
+  name: redis-sentinel
+  labels:
+    app.kubernetes.io/role: sentinel
+
+spec:
+  #
+  # Replica count: default 3 (recommended odd number for quorum).
+  replicas: 3
+
+  #
+  # POD SELECTOR: Matches pods managed by this StatefulSet.
+  #
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/role: sentinel
+
+  #
+  # Headless service provides stable DNS names used by Sentinels for peer discovery.
+  # Sentinels use these addresses to form quorum, exchange config, and monitor Redis.
+  # Keep replica counts odd to avoid split-brain and ensure clear quorum rules.
+  serviceName: redis-sentinel-headless
+
+  #
+  # Pod template
+  #
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/role: sentinel
+    spec:
+      # Allow Sentinels time to gracefully stop before forceful termination.
+      terminationGracePeriodSeconds: 60
+
+      #
+      # Affinity / scheduling preferences
+      #
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchExpressions:
+                    - key: app.kubernetes.io/role
+                      operator: In
+                      values:
+                        - sentinel
+
+      # Pod-level security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+
+      #
+      # Init container: copy Sentinel config files from ConfigMaps to a writable dir.
+      #
+      initContainers:
+        - name: init-sentinel
+          image: docker.io/library/redis
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+
+              # 1. Identify
+              echo "Sentinel Pod: $POD_NAME"
+              echo "IP: $POD_IP"
+
+              # 2. Prepare Configuration
+              # Copy config files to writable volume so we can modify them if needed
+              cp /mnt/sentinel.conf /etc/redis/sentinel.conf
+              cp /mnt/sentinel-custom.conf /etc/redis/sentinel-custom.conf
+              
+              # 3. Inject Secrets
+              echo "Generating auth config..."
+              echo "sentinel auth-pass mymaster $REDIS_PASSWORD" > /etc/redis/sentinel-auth.conf
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+            - name: REDIS_HEADLESS_SERVICE
+              value: "redis-headless"
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redis
+            - name: sentinel-config
+              mountPath: /mnt/sentinel.conf
+              subPath: sentinel.conf
+            - name: sentinel-custom-config
+              mountPath: /mnt/sentinel-custom.conf
+              subPath: sentinel-custom.conf
+
+      #
+      # Main container (redis-sentinel)
+      #
+      containers:
+        - name: sentinel
+          image: docker.io/library/redis
+
+          ports:
+            - name: sentinel
+              containerPort: 26379
+
+          command:
+            - redis-sentinel
+            - /etc/redis/sentinel.conf
+
+          # Resource requests and limits
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+          #
+          # Health checks
+          #
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli -p 26379 ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 1
+            failureThreshold: 3
+
+          livenessProbe:
+            tcpSocket:
+              port: sentinel
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          #
+          # Lifecycle hooks
+          #
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    sleep 5
+
+          #
+          # Container security context
+          #
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+
+          #
+          # VOLUME MOUNTS
+          #
+          volumeMounts:
+            - name: config
+              mountPath: /etc/redis
+
+      #
+      # Volumes (non-PVC)
+      #
+      volumes:
+        - name: config
+          emptyDir: {}
+
+        - name: sentinel-config
+          configMap:
+            name: sentinel-config
+
+        - name: sentinel-custom-config
+          configMap:
+            name: sentinel-custom-config

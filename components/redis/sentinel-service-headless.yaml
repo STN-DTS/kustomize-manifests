@@ -1,0 +1,29 @@
+# Redis Sentinel headless Service
+#
+# Provides per-pod DNS records required for Sentinel-to-Sentinel discovery
+# and quorum formation. Each Sentinel instance must be able to resolve the
+# other Sentinel pods' DNS records so they can elect leaders and coordinate
+# failover.
+#
+# Example FQDNs created by this headless Service:
+# - `redis-sentinel-0.redis-sentinel-headless.<namespace>.svc.cluster.local`
+# - `redis-sentinel-1.redis-sentinel-headless.<namespace>.svc.cluster.local`
+# - `redis-sentinel-2.redis-sentinel-headless.<namespace>.svc.cluster.local`
+#
+# Use this service for internal Sentinel peer discovery only. External clients
+# should query the ClusterIP sentinel service (or use redis-cli with Sentinel)
+# rather than directly addressing headless records.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel-headless
+spec:
+  selector:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/role: sentinel
+  clusterIP: None
+  ports:
+    - name: sentinel
+      port: 26379
+      targetPort: sentinel

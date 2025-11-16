@@ -16,6 +16,21 @@ templates for common application deployments.
 
 - **redis**: Redis cluster with Sentinel for high availability.
 
+## Examples
+
+The `examples/` directory contains sample overlays demonstrating how to
+customize the base components for different environments:
+
+- **redis/dev**: Development environment with 3 Redis replicas
+  (password-protected) and 1 Sentinel replica (password-protected). Uses minimal
+  resources suitable for development/testing.
+
+To deploy an example:
+
+```
+kubectl apply --kustomize examples/redis/overlays/dev/
+```
+
 ## Usage
 
 Use `kubectl apply --kustomize <component>/` to deploy the components.
@@ -60,6 +75,8 @@ patchesStrategicMerge:
 
 - `components/`: Directory containing Kustomize bases for different
   applications.
+- `examples/`: Sample overlays showing how to customize components for specific
+  environments.
 
 ## Resources
 
