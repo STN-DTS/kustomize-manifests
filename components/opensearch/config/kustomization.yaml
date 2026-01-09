@@ -1,0 +1,5 @@
+resources:
+  - opensearch-statefulset.yaml
+  - opensearch-service.yaml
+  - opensearch-configmap.yaml
+  # - opensearch-secret.yaml

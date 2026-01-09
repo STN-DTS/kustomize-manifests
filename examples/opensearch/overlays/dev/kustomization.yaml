@@ -1,0 +1,5 @@
+resources:
+  - ../../../../components/opensearch/config
+patchesStrategicMerge:
+  - opensearch-replicas-patch.yaml
+  - opensearch-resources-patch.yaml
