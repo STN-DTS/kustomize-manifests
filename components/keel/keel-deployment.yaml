@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keel
+  labels:
+    app: keel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keel
+  template:
+    metadata:
+      labels:
+        app: keel
+    spec:
+      containers:
+        # see https://github.com/keel-hq/keel/pkgs/container/keel
+        - image: ghcr.io/keel-hq/keel:0.21.1
+          env:
+            - name: RESTRICTED_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          name: keel
+          ports:
+            - name: http
+              containerPort: 9300
+      serviceAccountName: keel
