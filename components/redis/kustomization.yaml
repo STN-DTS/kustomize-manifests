@@ -18,11 +18,11 @@ labels:
       app.kubernetes.io/component: database
       app.kubernetes.io/managed-by: kustomize
       app.kubernetes.io/part-of: redis
-      app.kubernetes.io/version: 7.4.7
+      app.kubernetes.io/version: 8.2.5
 
 images:
   - name: docker.io/library/redis
-    newTag: 7.4.7-bookworm
+    newTag: 8.2.5-bookworm
 
 # Generate ConfigMaps from the local config files. Kustomize appends a
 # content-hash suffix to each generated ConfigMap name; when the file
