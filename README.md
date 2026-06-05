@@ -14,10 +14,50 @@ templates for common application deployments.
 
 ## Components
 
+- **keel**: A simple, robust, background service that automatically updates
+  Kubernetes workloads.
 - **redis**: Redis cluster with Sentinel for high availability.
 - **reloader**: Reloader controller that automatically triggers rolling updates
   on Deployments, StatefulSets, DaemonSets, and CronJobs when referenced
   ConfigMaps or Secrets are updated.
+
+## Versioning
+
+This repository uses Git tags to manage versions for the different components.
+The tagging convention follows this format:
+
+`<component-name>-<product-version>.<manifest-version>`
+
+For example, the tag `redis-7.4.7.000` breaks down as follows:
+- `redis`: The component or product name.
+- `7.4.7`: The upstream version of the product being deployed.
+- `000`: The internal version number for our manifests (starting at `000` and
+  incrementing for any updates to the manifests for that specific product
+  version).
+
+Other examples include:
+- `keel-0.21.1.000`
+- `reloader-1.4.10.000`
+
+## Releasing a New Version
+
+To release a new version of a component or to publish an update to its manifests:
+
+1. **Make changes:** Update the manifests within the specific component
+   directory (e.g., `components/redis/`).
+1. **Commit:** Commit and push your changes to the main branch.
+1. **Tag the release:** Create a new git tag following the versioning convention.
+   - *Product upgrade:* If upgrading the base product (e.g., from Redis 7.4.7 to
+     8.2.5), use the new product version and reset the manifest version to `000`
+     (e.g., `redis-8.2.5.000`).
+   - *Manifest update:* If fixing or updating the manifests for an existing
+     product version, increment the manifest version (e.g., from
+     `redis-7.4.7.000` to `redis-7.4.7.001`).
+1. **Push the tag:** Push the new tag to the remote repository:
+   ```bash
+   git tag redis-8.2.5.000
+   git push origin redis-8.2.5.000
+   ```
 
 ## Examples
 
