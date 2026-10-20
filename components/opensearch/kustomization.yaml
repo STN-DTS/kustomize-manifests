@@ -1,0 +1,29 @@
+#
+# Base Kustomization for an OpenSearch cluster managed by the OpenSearch
+# Operator.
+#
+# This kustomization defines operator custom resources only; the OpenSearch
+# Operator and its CRDs must already be installed in the cluster. The
+# OpenSearchCluster is intentionally incomplete — overlays must supply the
+# image, node pools, and suffixed secret/service names (see
+# opensearch-cluster.yaml).
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Global labels applied to all resources created by this kustomization.
+# Uses the `app.kubernetes.io/*` conventions so tools and dashboards can
+# consistently identify resources.
+labels:
+  - pairs:
+      app.kubernetes.io/name: opensearch
+      app.kubernetes.io/component: search
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: opensearch
+      app.kubernetes.io/version: 3.7.0
+
+# Base resources included in this kustomization. Overlays must patch the
+# cluster and repair inline cluster references after any nameSuffix.
+resources:
+  - ./opensearch-cluster.yaml # OpenSearchCluster skeleton (completed by overlays)
+  - ./opensearch-role.yaml    # OpensearchRole template granting read/write on app-* indices

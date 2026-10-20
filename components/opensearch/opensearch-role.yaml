@@ -1,0 +1,43 @@
+# Base OpensearchRole for application index access.
+#
+# Purpose: defines the reusable permission set granted to an application's
+# service identity. The role allows read/write and index-management actions
+# for the application's indices.
+#
+# Overlay notes:
+#   - `app-readwrite` and the `app-*` index pattern are placeholders. Consumers
+#     should rename the role and patch `spec.indexPermissions[0].indexPatterns`
+#     to their own index prefix.
+#   - Kustomize nameSuffix transforms `metadata.name` but not inline CRD spec
+#     values. Overlays patch `spec.opensearchCluster.name` to the environment-
+#     specific cluster name (for example `opensearch-dev`).
+
+apiVersion: opensearch.org/v1
+kind: OpensearchRole
+metadata:
+  name: app-readwrite
+spec:
+  opensearchCluster:
+    name: opensearch
+  clusterPermissions:
+    # Required by this OpenSearch Security setup for document writes, including
+    # PUT /{index}/_doc/{id}, POST /{index}/_create/{id}, and POST /_bulk.
+    - indices:data/write/bulk*
+  indexPermissions:
+    - indexPatterns:
+        - "app-*"
+      allowedActions:
+        # Searches: POST /{index}/_search, plus document retrieval/count.
+        - read
+
+        # Single-document indexing and bulk ingestion.
+        - write
+
+        # Versioned-index creation, mappings, and index settings needed by an
+        # indexing workflow.
+        - create_index
+        - indices:admin/mapping/put
+        - indices:admin/settings/update
+
+        # Alias reads and atomic alias create/swap/remove operations.
+        - indices:admin/aliases*
