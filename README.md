@@ -16,6 +16,11 @@ templates for common application deployments.
 
 - **keel**: A simple, robust, background service that automatically updates
   Kubernetes workloads.
+- **opensearch**: OpenSearch cluster and an application read/write role
+  (`app-readwrite` on `app-*` indices) as OpenSearch Operator custom resources.
+  Requires the operator and its CRDs; the cluster is incomplete on its own, so
+  overlays must supply the image, node pools, and environment-specific secret
+  and service names, and should rename the role and its index pattern.
 - **redis**: Redis cluster with Sentinel for high availability.
 - **reloader**: Reloader controller that automatically triggers rolling updates
   on Deployments, StatefulSets, DaemonSets, and CronJobs when referenced

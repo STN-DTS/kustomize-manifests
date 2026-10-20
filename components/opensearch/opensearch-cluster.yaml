@@ -1,0 +1,57 @@
+# Base OpenSearchCluster CR — environment-neutral skeleton managed by the
+# OpenSearch Operator.
+#
+# What belongs here: settings that are identical across all environments —
+# service name, port, TLS generation policy, and the operator-managed security
+# config structure.
+#
+# What does NOT belong here (must be supplied by each overlay patch):
+#   spec.general.image          — ACR image URL/tag varies per environment.
+#   spec.general.imagePullPolicy — Never for k3d/local, IfNotPresent for cloud.
+#   spec.nodePools              — replicas, JVM heap, resources, and persistence
+#                                 (emptyDir vs PVC) all differ per environment.
+#   spec.security.config.*Secret.name — Kustomize nameSuffix applies to
+#                                 metadata.name only, not to inline CRD spec
+#                                 values, so each overlay must patch these
+#                                 explicitly (e.g. opensearch-admin-credentials-dev).
+#
+# Optional overlay settings:
+#   spec.general.additionalConfig."cluster.name" — defaults to the
+#                                 OpenSearchCluster name set by the operator;
+#                                 consumers may set their own cluster name.
+#
+# This resource is intentionally incomplete on its own; it is only valid after
+# an overlay patch adds the missing fields. Do not apply the base directly.
+
+apiVersion: opensearch.org/v1
+kind: OpenSearchCluster
+metadata:
+  name: opensearch
+spec:
+  general:
+    version: "3.7.0"
+    serviceName: opensearch
+    httpPort: 9200
+    drainDataNodes: false
+    setVMMaxMapCount: false
+    additionalConfig:
+      plugins.security.allow_default_init_securityindex: "true"
+      plugins.security.audit.type: internal_opensearch
+      # plugins.security.authcz.admin_dn: "['CN=opensearch,OU=opensearch']"
+  security:
+    config:
+      # Patched per overlay to add the correct environment suffix.
+      # The operator uses adminCredentialsSecret to apply security
+      # configurations via the REST API after the cluster is ready.
+      adminCredentialsSecret:
+        name: opensearch-admin-credentials
+      # Patched per overlay to add the correct environment suffix.
+      # Supplies config.yml and internal_users.yml for the security plugin.
+      securityConfigSecret:
+        name: opensearch-security-config
+    tls:
+      transport:
+        generate: true
+        perNode: true
+      http:
+        generate: true
