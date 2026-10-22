@@ -1,0 +1,25 @@
+apiVersion: opensearch.org/v1
+kind: OpenSearchISMPolicy
+metadata:
+  name: security-auditlog-retention
+spec:
+  opensearchCluster:
+    name: opensearch
+  policyId: security-auditlog-retention
+  description: Delete security audit log indices after 3 days.
+  applyToExistingIndices: true
+  ismTemplate:
+    indexPatterns:
+      - "security-auditlog-*"
+    priority: 100
+  defaultState: hot
+  states:
+    - name: hot
+      actions: []
+      transitions:
+        - stateName: delete
+          conditions:
+            minIndexAge: "3d"
+    - name: delete
+      actions:
+        - delete: {}
