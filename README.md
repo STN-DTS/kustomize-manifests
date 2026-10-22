@@ -21,6 +21,8 @@ templates for common application deployments.
   Requires the operator and its CRDs; the cluster is incomplete on its own, so
   overlays must supply the image, node pools, and environment-specific secret
   and service names, and should rename the role and its index pattern.
+  The optional `opensearch/auditlog-retention` add-on deletes security audit
+  log indices after 3 days.
 - **redis**: Redis cluster with Sentinel for high availability.
 - **reloader**: Reloader controller that automatically triggers rolling updates
   on Deployments, StatefulSets, DaemonSets, and CronJobs when referenced

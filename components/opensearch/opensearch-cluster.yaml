@@ -10,6 +10,11 @@
 #   spec.general.imagePullPolicy — Never for k3d/local, IfNotPresent for cloud.
 #   spec.nodePools              — replicas, JVM heap, resources, and persistence
 #                                 (emptyDir vs PVC) all differ per environment.
+#                                 Every node pool must also set env
+#                                 DISABLE_INSTALL_DEMO_CONFIG="true" so the demo
+#                                 installer cannot overwrite the supplied
+#                                 security config; the CRD has no cluster-level
+#                                 env and overlays replace this list wholesale.
 #   spec.security.config.*Secret.name — Kustomize nameSuffix applies to
 #                                 metadata.name only, not to inline CRD spec
 #                                 values, so each overlay must patch these

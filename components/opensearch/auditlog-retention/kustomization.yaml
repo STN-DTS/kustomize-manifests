@@ -1,0 +1,22 @@
+#
+# Optional add-on for the opensearch component: an ISM policy that deletes
+# security audit log indices so `plugins.security.audit.type:
+# internal_opensearch` cannot fill the node volumes.
+#
+# Reference this directory alongside the opensearch component. Overlays must
+# patch `spec.opensearchCluster.name` after any nameSuffix, and may patch the
+# delete transition's `minIndexAge` to change retention.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: opensearch
+      app.kubernetes.io/component: search
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: opensearch
+      app.kubernetes.io/version: 3.7.0
+
+resources:
+  - ./auditlog-retention-policy.yaml # OpenSearchISMPolicy deleting security-auditlog-* indices
