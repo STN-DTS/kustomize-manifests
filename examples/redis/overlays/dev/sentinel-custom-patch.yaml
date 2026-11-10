@@ -3,7 +3,7 @@
 #
 # Configures Sentinel custom settings for development.
 # This patch overrides the base custom configuration with dev-specific settings:
-#   - Monitor the dev-redis-0.dev-redis-headless with quorum 1
+#   - Monitor redis-dev-0.redis-headless-dev with quorum 1
 #
 
 apiVersion: v1
@@ -14,6 +14,5 @@ data:
   sentinel-custom.conf: |
     # The monitor line points Sentinel at the master pod in this overlay.
     # Format: sentinel monitor <name> <host> <port> <quorum>
-    # We patch this per-overlay so Sentinel watches the correct pod DNS
-    # (e.g. dev-redis-0.dev-redis-headless).
+    # The -dev name suffix applies to the StatefulSet and headless Service.
     sentinel monitor mymaster redis-dev-0.redis-headless-dev 6379 1

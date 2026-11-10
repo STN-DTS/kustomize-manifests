@@ -2,19 +2,19 @@
 #
 # Configures Sentinels for development with minimal setup.
 # This patch overrides the base Sentinel StatefulSet with dev-specific settings:
-#   - 1 replica: Single Sentinel for basic monitoring (no quorum/failover)
+#   - 1 replica: Single Sentinel with no Sentinel redundancy
 #   - Minimal resources: suitable for development environments
 #
 # Key differences from production:
-#   - 1 Sentinel = no quorum (cannot perform failover)
-#   - Basic monitoring only
+#   - With monitor quorum 1, the Sentinel can authorize failover
+#   - A single Sentinel provides no redundancy for monitoring/failover
 
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: redis-sentinel
 spec:
-  # Single sentinel for development - no HA failover capability
+  # A single Sentinel is not redundant.
   replicas: 1
   template:
     spec:

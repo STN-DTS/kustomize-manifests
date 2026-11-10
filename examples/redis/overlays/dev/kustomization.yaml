@@ -3,12 +3,11 @@
 #
 # This overlay provides a basic Redis setup for development and testing.
 # It inherits all base resources and applies dev-specific customizations:
-#   - 3 replica Redis for basic HA development testing
-#   - Single Sentinel for basic monitoring (no failover capability)
+#   - Redis primary and replicas for development testing
+#   - Single Sentinel with quorum 1 (no Sentinel redundancy)
 #   - Minimal resource requests/limits for development
 #   - 1Gi persistent storage
 #   - nameSuffix "-dev" to isolate dev resources
-#   - Isolated redis-dev namespace
 #
 # Deployment:
 #   kubectl apply --kustomize examples/redis/overlays/dev/
@@ -28,14 +27,14 @@ labels:
       app.kubernetes.io/instance: dev
 
 resources:
-  # - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-7.4.7.000
+  # - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-8.2.5.000
   - ../../../../components/redis
 
 # Patches override base configuration with dev-specific values.
-# Apply patches in dependency order: containers (resources) → StatefulSet → ConfigMap
 patches:
   - path: ./redis-custom-patch.yaml
   - path: ./redis-secret-patch.yaml
+  - path: ./redis-service-patch.yaml
   - path: ./sentinel-custom-patch.yaml
   - path: ./sentinel-patch.yaml
   - path: ./statefulset-patch.yaml

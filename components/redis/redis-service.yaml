@@ -4,6 +4,9 @@
 # (by default `redis-0`). This is convenient for write-heavy clients that
 # always connect to a single endpoint.
 #
+# Overlays that rename resources must also patch the pod-name selector to
+# match the renamed StatefulSet pod.
+#
 # Caveat: If a Sentinel-triggered failover promotes a different pod to
 # master, this Service will continue to route to the statically-selected
 # pod (e.g. `redis-0`) and will not automatically follow the new master.
