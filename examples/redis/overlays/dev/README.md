@@ -115,7 +115,7 @@ From the repository root:
          app.kubernetes.io/instance: staging
 
    resources:
-     - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-8.2.5.000
+     - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-8.10.3.000
 
    patches:
      - path: redis-custom-patch.yaml

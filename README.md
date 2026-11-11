@@ -41,7 +41,7 @@ The tagging convention follows this format:
 
 `<component-name>-<product-version>.<manifest-version>`
 
-For example, the current tag `redis-8.2.5.000` breaks down as follows:
+For example, the current tag `redis-8.10.3.000` breaks down as follows:
 - `redis`: The component or product name.
 - `7.4.7`: The upstream version of the product being deployed.
 - `000`: The internal version number for our manifests (starting at `000` and
@@ -62,15 +62,15 @@ To release a new version of a component or to publish an update to its manifests
 2. **Commit:** Commit and push your changes to the main branch.
 3. **Tag the release:** Create a new git tag following the versioning convention.
    - *Product upgrade:* If upgrading the base product (e.g., from Redis 7.4.7 to
-     8.2.5), use the new product version and reset the manifest version to `000`
-     (e.g., `redis-8.2.5.000`).
+     8.10.3), use the new product version and reset the manifest version to `000`
+     (e.g., `redis-8.10.3.000`).
    - *Manifest update:* If fixing or updating the manifests for an existing
      product version, increment the manifest version (e.g., from
      `redis-7.4.7.000` to `redis-7.4.7.001`).
 4. **Push the tag:** Push the new tag to the remote repository:
    ```bash
-   git tag redis-8.2.5.000
-   git push origin redis-8.2.5.000
+   git tag redis-8.10.3.000
+   git push origin redis-8.10.3.000
    ```
 
 ## Examples
@@ -114,7 +114,7 @@ create an overlay:
    apiVersion: kustomize.config.k8s.io/v1beta1
    kind: Kustomization
    resources:
-     - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-8.2.5.000
+     - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-8.10.3.000
    ```
 
 3. Before applying, replace the Redis base's all-zero placeholder password
