@@ -9,7 +9,7 @@ labels:
       app.kubernetes.io/name: keel
       app.kubernetes.io/component: controller
       app.kubernetes.io/managed-by: kustomize
-      app.kubernetes.io/version: 0.21.1
+      app.kubernetes.io/version: 0.22.4
 
 resources:
   - ./keel-deployment.yaml       # Keel Deployment

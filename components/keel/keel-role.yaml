@@ -41,3 +41,4 @@ rules:
       - get
       - list
       - watch
+      - update

@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         # see https://github.com/keel-hq/keel/pkgs/container/keel
-        - image: ghcr.io/keel-hq/keel:0.21.1
+        - image: ghcr.io/keel-hq/keel:0.22.4
           env:
             - name: RESTRICTED_NAMESPACE
               valueFrom:

@@ -49,7 +49,7 @@ For example, the current tag `redis-8.2.5.000` breaks down as follows:
   version).
 
 Other examples include:
-- `keel-0.21.1.000`
+- `keel-0.22.4.000`
 - `reloader-1.4.10.000`
 
 ## Releasing a New Version
