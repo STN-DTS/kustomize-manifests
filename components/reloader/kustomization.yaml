@@ -15,7 +15,7 @@ labels:
       app.kubernetes.io/name: reloader
       app.kubernetes.io/component: controller
       app.kubernetes.io/managed-by: kustomize
-      app.kubernetes.io/version: 1.4.10
+      app.kubernetes.io/version: 1.4.24
 
 resources:
   - ./reloader-deployment.yaml       # Reloader Deployment
