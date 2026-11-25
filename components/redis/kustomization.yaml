@@ -18,11 +18,11 @@ labels:
       app.kubernetes.io/component: database
       app.kubernetes.io/managed-by: kustomize
       app.kubernetes.io/part-of: redis
-      app.kubernetes.io/version: 8.10.3
+      app.kubernetes.io/version: 8.12.0
 
 images:
   - name: docker.io/library/redis
-    newTag: 8.10.3-trixie
+    newTag: 8.12.0-trixie
 
 # Generate ConfigMaps from the local config files. Kustomize appends a
 # content-hash suffix to each generated ConfigMap name; when the file
@@ -46,10 +46,11 @@ configMapGenerator:
 # these resources to adjust settings (e.g., replicas, resource requests,
 # or secrets) per environment.
 resources:
+  - ./pod-disruption-budgets.yaml    # PDBs preserving Redis & Sentinel HA during drains
   - ./redis-secret.yaml              # Secret with Redis credentials (patched in overlays)
   - ./redis-service-headless.yaml    # Headless Service for stable DNS per pod
-  - ./redis-service.yaml             # ClusterIP Service (typically points to Redis master)
+  - ./redis-service.yaml             # DEPRECATED: static ClusterIP targeting ordinal 0
   - ./redis-statefulset.yaml         # StatefulSet managing Redis master/replicas
   - ./sentinel-service-headless.yaml # Headless Service used by Sentinels for discovery
-  - ./sentinel-service.yaml          # ClusterIP Service for Sentinel clients (optional)
+  - ./sentinel-service.yaml          # ClusterIP Service for Sentinel clients
   - ./sentinel-statefulset.yaml      # StatefulSet managing Sentinel instances

@@ -12,6 +12,5 @@ metadata:
   name: redis-custom-config
 data:
   redis-custom.conf: |
-    # Dev: maxmemory set to 128mb to fit within 256Mi container limit
-    # while allowing data for development
+    # Dev: maxmemory set to 128mb to leave fork CoW headroom within 384Mi limit
     maxmemory 128mb

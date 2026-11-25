@@ -34,6 +34,12 @@ spec:
   replicas: 3
 
   #
+  # Parallel pod management avoids blocking recovery of healthy replicas if
+  # ordinal 0 is temporarily unhealthy.
+  #
+  podManagementPolicy: Parallel
+
+  #
   # POD SELECTOR: Matches pods managed by this StatefulSet.
   #
   selector:
@@ -49,7 +55,8 @@ spec:
 
   #
   # Persistent storage template: each pod gets its own PVC named by ordinal.
-  # Adjust `storage` in overlays for production workloads.
+  # Size PVC to at least 4x maxmemory (default 1Gi for 256mb maxmemory) to
+  # leave headroom for AOF, RDB, and rewrite temporary files.
   #
   volumeClaimTemplates:
     - metadata:
@@ -59,8 +66,7 @@ spec:
           - ReadWriteOnce
         resources:
           requests:
-            # Persistent volume size: 256Mi by default.
-            storage: 256Mi
+            storage: 1Gi
 
   #
   # Pod template
@@ -71,6 +77,8 @@ spec:
         app.kubernetes.io/name: redis
         app.kubernetes.io/role: server
     spec:
+      automountServiceAccountToken: false
+
       # Allow Redis time to persist data on termination before SIGKILL.
       terminationGracePeriodSeconds: 60
 
@@ -83,11 +91,9 @@ spec:
               podAffinityTerm:
                 topologyKey: kubernetes.io/hostname
                 labelSelector:
-                  matchExpressions:
-                    - key: app.kubernetes.io/role
-                      operator: In
-                      values:
-                        - server
+                  matchLabels:
+                    app.kubernetes.io/name: redis
+                    app.kubernetes.io/role: server
 
       #
       # Pod-level security context
@@ -95,14 +101,16 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 35534
+        runAsGroup: 35534
         fsGroup: 35534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
 
       #
-      # Init container prepares per-pod Redis configuration. It copies
-      # ConfigMap files into a writable directory and writes a small
-      # `redis-replication.conf` that makes non-zero ordinals replicate from
-      # the headless master address. The init container reads the pod
-      # name from the Downward API and the password from `redis-secret`.
+      # Init container prepares a single flat /etc/redis/redis.conf and
+      # /etc/redis/users.acl so CONFIG REWRITE works cleanly across in-place
+      # container restarts without include-file conflicts.
       #
       initContainers:
         - name: init-redis
@@ -111,69 +119,129 @@ spec:
             - bash
             - -c
             - |
-              set -eu
+              set -euo pipefail
 
-              # 1. Prepare Configuration
-              cp /mnt/redis.conf /etc/redis/redis.conf
-              cp /mnt/redis-custom.conf /etc/redis/redis-custom.conf
-              echo "requirepass $REDIS_PASSWORD" > /etc/redis/redis-auth.conf
+              escape_redis_str() {
+                local s="$1"
+                s="${s//\\/\\\\}"
+                s="${s//\"/\\\"}"
+                printf '%s' "$s"
+              }
 
-              # 2. Identify Identity and Default Master
+              # 1. Identify Pod and Stable FQDN
               ordinal="${POD_NAME##*-}"
               statefulset="${POD_NAME%-${ordinal}}"
-              static_master="${statefulset}-0.${REDIS_HEADLESS_SERVICE}"
-              
+              pod_short="${POD_NAME}.${REDIS_HEADLESS_SERVICE}"
+              detected_fqdn=$(hostname -f 2>/dev/null || true)
+              if [[ "$detected_fqdn" == *.* ]]; then
+                pod_fqdn="$detected_fqdn"
+              else
+                pod_fqdn="${pod_short}.${POD_NAMESPACE}.svc.cluster.local"
+              fi
+              fqdn_domain="${pod_fqdn#${POD_NAME}.}"
+              static_master="${statefulset}-0.${fqdn_domain}"
+
               echo "Pod: $POD_NAME (Ordinal: $ordinal)"
-              echo "IP: $POD_IP"
+              echo "FQDN: $pod_fqdn (IP: $POD_IP)"
 
-              # Default assumption: I am a replica of the static master (redis-0)
-              # Unless I am redis-0, then I assume I am master (bootstrap case).
-              master_host="$static_master"
-              if [ "$ordinal" = "0" ]; then
-                  master_host="" # I am master
+              # 2. Generate ACL File (default user via SHA-256 hash + optional workload ACLs)
+              pass_hash=$(printf '%s' "$REDIS_PASSWORD" | sha256sum | cut -d' ' -f1)
+              printf 'user default on #%s ~* &* +@all\n' "$pass_hash" > /etc/redis/users.acl
+
+              if [ -n "${REDIS_ACL_DIR:-}" ] && [ -d "$REDIS_ACL_DIR" ]; then
+                shopt -s nullglob
+                for acl_file in "$REDIS_ACL_DIR"/*.conf; do
+                  # Strip blank lines and comments (Redis aclfile syntax rejects '#' comments)
+                  grep -vE '^[[:space:]]*(#|$)' "$acl_file" >> /etc/redis/users.acl || true
+                done
+                shopt -u nullglob
               fi
 
-              # 3. Discovery: Ask Sentinel for the *real* master
-              # We use a timeout to avoid blocking startup if Sentinel is unavailable.
-              echo "Attempting master discovery via Sentinel..."
-              if sentinel_info=$(timeout 3s redis-cli -h $SENTINEL_HOST -p 26379 --raw sentinel get-master-addr-by-name mymaster 2>/dev/null); then
-                  # Output is two lines: <ip>\n<port>
-                  reported_master_ip=$(echo "$sentinel_info" | head -n 1)
-                  
-                  if [ -n "$reported_master_ip" ]; then
-                      echo "Sentinel reports master is: $reported_master_ip"
-                      
-                      if [ "$reported_master_ip" = "$POD_IP" ]; then
-                          # Sentinel says I am the master.
-                          master_host=""
-                      elif timeout 1 bash -c "echo > /dev/tcp/$reported_master_ip/6379" 2>/dev/null; then
-                          # Sentinel says someone else is master, AND they are reachable.
-                          echo "Master $reported_master_ip is reachable."
-                          master_host="$reported_master_ip"
-                      else
-                          # Sentinel says someone else is master, but they are NOT reachable.
-                          echo "Master $reported_master_ip is unreachable (ghost). Ignoring."
-                      fi
+              # 3. Discover Current Primary via Sentinel (with retry and response validation)
+              master_host=""
+              master_port="6379"
+              sentinel_answered=false
+
+              echo "Attempting primary discovery via Sentinel ($SENTINEL_HOST:26379)..."
+              for attempt in 1 2 3; do
+                sentinel_info=""
+                if [ -n "${SENTINEL_PASSWORD:-}" ]; then
+                  sentinel_info=$(REDISCLI_AUTH="$SENTINEL_PASSWORD" timeout 3s redis-cli -h "$SENTINEL_HOST" -p 26379 --no-auth-warning --raw sentinel get-master-addr-by-name mymaster 2>/dev/null || true)
+                else
+                  sentinel_info=$(timeout 3s redis-cli -h "$SENTINEL_HOST" -p 26379 --no-auth-warning --raw sentinel get-master-addr-by-name mymaster 2>/dev/null || true)
+                fi
+
+                reported_host=$(printf '%s\n' "$sentinel_info" | sed -n '1p')
+                reported_port=$(printf '%s\n' "$sentinel_info" | sed -n '2p')
+
+                if [ -n "$reported_host" ] && [[ ! "$reported_host" =~ [[:space:]] ]] && [[ "$reported_port" =~ ^[0-9]+$ ]]; then
+                  sentinel_answered=true
+                  echo "Sentinel reports primary is: ${reported_host}:${reported_port}"
+                  if [ "$reported_host" = "$pod_fqdn" ] || [ "$reported_host" = "$pod_short" ] || [ "$reported_host" = "$POD_IP" ]; then
+                    master_host=""
+                  else
+                    master_host="$reported_host"
+                    master_port="$reported_port"
                   fi
-              else
-                  echo "Sentinel unreachable or silent. Falling back to static role."
+                  break
+                fi
+
+                [ "$attempt" -lt 3 ] && sleep 1
+              done
+
+              # 4. Fallback when Sentinel is unreachable: check Redis peers before bootstrap default
+              if [ "$sentinel_answered" = false ]; then
+                echo "Sentinel unreachable or returned no valid primary. Probing Redis peers..."
+                peer_master=""
+                peer_count="${REDIS_PEER_SCAN_COUNT:-3}"
+                for (( idx=0; idx<peer_count; idx++ )); do
+                  [ "$idx" = "$ordinal" ] && continue
+                  peer_fqdn="${statefulset}-${idx}.${fqdn_domain}"
+                  peer_info=$(REDISCLI_AUTH="$REDIS_PASSWORD" timeout 2s redis-cli -h "$peer_fqdn" -p 6379 --no-auth-warning info replication 2>/dev/null || true)
+                  if printf '%s\n' "$peer_info" | grep -q '^role:master'; then
+                    peer_master="$peer_fqdn"
+                    echo "Discovered active primary via peer probe: $peer_master"
+                    break
+                  fi
+                done
+
+                if [ -n "$peer_master" ]; then
+                  master_host="$peer_master"
+                elif [ "$ordinal" = "0" ]; then
+                  master_host=""
+                else
+                  master_host="$static_master"
+                fi
               fi
 
-              # 4. Write Replication Config
-              if [ -z "$master_host" ]; then
-                  echo "Role: MASTER"
-                  echo "# User-supplied master node" > /etc/redis/redis-replication.conf
-              else
-                  echo "Role: REPLICA of $master_host"
-                  echo "replicaof $master_host 6379" > /etc/redis/redis-replication.conf
-                  echo "masterauth $REDIS_PASSWORD" >> /etc/redis/redis-replication.conf
-              fi
+              # 5. Render Single Flat Configuration File (no includes)
+              escaped_pass=$(escape_redis_str "$REDIS_PASSWORD")
+              {
+                cat /mnt/redis.conf
+                printf '\n'
+                cat /mnt/redis-custom.conf
+                printf '\n# Generated by init-redis\n'
+                printf 'aclfile "/etc/redis/users.acl"\n'
+                printf 'masterauth "%s"\n' "$escaped_pass"
+                printf 'replica-announce-ip "%s"\n' "$pod_fqdn"
+                printf 'replica-announce-port 6379\n'
+                if [ -n "$master_host" ]; then
+                  echo "Role: REPLICA of ${master_host}:${master_port}" >&2
+                  printf 'replicaof "%s" %s\n' "$master_host" "$master_port"
+                else
+                  echo "Role: PRIMARY" >&2
+                fi
+              } > /etc/redis/redis.conf
 
           env:
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
             - name: POD_IP
               valueFrom:
                 fieldRef:
@@ -185,8 +253,33 @@ spec:
                   key: password
             - name: SENTINEL_HOST
               value: "redis-sentinel"
+            - name: SENTINEL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: sentinel-password
+                  optional: true
             - name: REDIS_HEADLESS_SERVICE
               value: "redis-headless"
+            - name: REDIS_ACL_DIR
+              value: "/etc/redis-acl"
+            - name: REDIS_PEER_SCAN_COUNT
+              value: "3"
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
 
           volumeMounts:
             - name: config
@@ -217,44 +310,63 @@ spec:
                   key: password
 
           command:
-            - sh
-            - -c
-            - exec redis-server /etc/redis/redis.conf
+            - redis-server
+            - /etc/redis/redis.conf
 
-          # Resource requests and limits
+          # Resource requests and limits (keep maxmemory <= 50% of memory limit for fork CoW headroom)
           resources:
             requests:
               cpu: 100m
               memory: 256Mi
             limits:
               cpu: 500m
-              memory: 512Mi
+              memory: 768Mi
 
           #
-          # Health checks: readiness ensures the process answers PING with auth,
-          # liveness checks the socket to detect dead processes.
+          # Health checks:
+          # - startupProbe protects slow AOF/RDB loads before liveness runs
+          # - readinessProbe requires exact PONG (rejects NOAUTH/LOADING)
+          # - livenessProbe checks event loop responsiveness while tolerating LOADING/MASTERDOWN
           #
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - out=$(REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --no-auth-warning ping 2>/dev/null) && [ "$out" = "PONG" ]
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+
           readinessProbe:
             exec:
               command:
                 - sh
                 - -c
-                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping
+                - out=$(REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --no-auth-warning ping 2>/dev/null) && [ "$out" = "PONG" ]
             initialDelaySeconds: 5
             periodSeconds: 5
-            timeoutSeconds: 2
+            timeoutSeconds: 3
             failureThreshold: 3
 
           livenessProbe:
-            tcpSocket:
-              port: redis
-            initialDelaySeconds: 30
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  out=$(REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --no-auth-warning ping 2>/dev/null)
+                  case "$out" in
+                    PONG|LOADING*|MASTERDOWN*) exit 0 ;;
+                    *) exit 1 ;;
+                  esac
+            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
 
           #
-          # Lifecycle hooks
+          # Lifecycle hooks: brief drain sleep before SIGTERM triggers Redis's native save/shutdown.
           #
           lifecycle:
             preStop:
@@ -262,9 +374,7 @@ spec:
                 command:
                   - sh
                   - -c
-                  - |
-                    redis-cli -p 6379 save || true
-                    sleep 5
+                  - sleep 5
 
           #
           # Container security context
@@ -272,6 +382,9 @@ spec:
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
 
           #
           # VOLUME MOUNTS
@@ -296,7 +409,3 @@ spec:
         - name: redis-custom-config
           configMap:
             name: redis-custom-config
-
-        - name: redis-secret
-          secret:
-            secretName: redis-secret

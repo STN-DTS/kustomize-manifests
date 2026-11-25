@@ -1,0 +1,34 @@
+# PodDisruptionBudgets for Redis and Sentinel
+#
+# Allows at most one pod to be voluntarily disrupted at a time during node
+# drains or cluster upgrades, preserving Redis availability and Sentinel
+# quorum (for 3+ replicas) while still permitting drains on 1-replica dev
+# overlays (`maxUnavailable: 1`).
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis
+  labels:
+    app.kubernetes.io/role: server
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/role: server
+
+---
+
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-sentinel
+  labels:
+    app.kubernetes.io/role: sentinel
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+      app.kubernetes.io/role: sentinel

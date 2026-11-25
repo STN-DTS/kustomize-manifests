@@ -1,8 +1,10 @@
 # Redis `dev` environment overlay
 
 This overlay provides a Redis primary/replica deployment with Sentinel for
-development and testing. It uses include-based configuration so overlays can
-change environment-specific settings without copying the base configuration.
+development and testing. It uses flat config generation (`init-redis` and
+`init-sentinel` merge base and custom ConfigMaps into writable files) so
+overlays can change environment-specific settings without copying the base
+configuration and without `CONFIG REWRITE` include-file conflicts.
 This is not Redis Cluster mode.
 
 ## Overview
@@ -46,7 +48,7 @@ development password is not suitable for production.
 - **Replicas**: 3.
 - **Initial primary**: `redis-dev-0`.
 - **Initial replicas**: `redis-dev-1` and `redis-dev-2`.
-- **Resources**: 50m CPU request, 200m limit; 128Mi memory request, 256Mi
+- **Resources**: 50m CPU request, 200m limit; 128Mi memory request, 384Mi
   limit.
 - **Redis maxmemory**: 128mb.
 
@@ -82,9 +84,14 @@ key. There is no separate Sentinel Secret.
 
 ## Configuration
 
-The base Redis and Sentinel config files include separate custom config files.
-The overlay patches those custom ConfigMaps instead of copying the full base
-configuration:
+The base Redis and Sentinel init containers merge the base and custom config
+files into single flat configs (`/etc/redis/redis.conf` and
+`/etc/redis/sentinel.conf`). Overlays patch the custom ConfigMaps instead of
+copying the full base configuration. To add workload ACL users without causing
+`CONFIG REWRITE` duplicate-user errors, mount `*.conf` files onto the
+`init-redis` container at `/etc/redis-acl` (or `REDIS_ACL_DIR`) so `init-redis`
+merges them into the generated `aclfile` (`/etc/redis/users.acl`). Do not
+redefine `user default` in workload ACL files:
 
 - `redis-custom-patch.yaml` changes environment-specific Redis settings.
 - `sentinel-custom-patch.yaml` sets the monitor target and quorum.
@@ -115,12 +122,13 @@ From the repository root:
          app.kubernetes.io/instance: staging
 
    resources:
-     - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-8.10.3.000
+     - github.com/stn-dts/kustomize-manifests/components/redis?ref=redis-8.12.0.000
 
    patches:
      - path: redis-custom-patch.yaml
      - path: redis-secret-patch.yaml
      - path: sentinel-custom-patch.yaml
+     - path: sentinel-patch.yaml
      - path: statefulset-patch.yaml
      - path: redis-service-patch.yaml
    ```
@@ -128,7 +136,8 @@ From the repository root:
 3. Create `redis-custom-patch.yaml` and `sentinel-custom-patch.yaml` from the
    examples below. For 3 Sentinels, use quorum 2. The base already configures 3
    Sentinel replicas.
-4. Create `statefulset-patch.yaml` to use the suffixed discovery services:
+4. Create `statefulset-patch.yaml` and `sentinel-patch.yaml` to use the
+   suffixed discovery services:
 
    ```yaml
    apiVersion: apps/v1
@@ -145,6 +154,21 @@ From the repository root:
                  value: redis-sentinel-staging
                - name: REDIS_HEADLESS_SERVICE
                  value: redis-headless-staging
+   ```
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: StatefulSet
+   metadata:
+     name: redis-sentinel
+   spec:
+     template:
+       spec:
+         initContainers:
+           - name: init-sentinel
+             env:
+               - name: SENTINEL_HEADLESS_SERVICE
+                 value: redis-sentinel-headless-staging
    ```
 
 5. Create `redis-service-patch.yaml` so the static Service selects the

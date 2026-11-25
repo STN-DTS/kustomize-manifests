@@ -19,6 +19,7 @@ kind: Service
 metadata:
   name: redis-sentinel-headless
 spec:
+  publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: redis
     app.kubernetes.io/role: sentinel

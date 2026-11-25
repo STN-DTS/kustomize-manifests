@@ -22,6 +22,7 @@ kind: Service
 metadata:
   name: redis-headless
 spec:
+  publishNotReadyAddresses: true
   selector:
     app.kubernetes.io/name: redis
     app.kubernetes.io/role: server
