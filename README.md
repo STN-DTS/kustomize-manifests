@@ -139,6 +139,25 @@ create an overlay:
   applications.
 - `examples/`: Sample overlays showing how to customize components for specific
   environments.
+- `tests/`: Automated manifest and container integration tests.
+
+## Testing
+
+The Redis test suite validates both rendered Kustomize manifests and live
+multi-node Redis + Sentinel behavior (replication, workload ACLs, probes,
+failover, `masterauth`, in-place restarts after `CONFIG REWRITE`, pod
+recreation, and optional Sentinel authentication) using `podman` or `docker`:
+
+```bash
+# Static manifest tests only (requires kubectl + Python 3 with PyYAML)
+python3 -m unittest tests/redis/test_manifests.py -v
+
+# Live container integration tests (requires podman or docker)
+python3 -m unittest tests/redis/test_integration.py -v
+
+# Run all Redis tests
+python3 -m unittest discover -s tests/redis -v
+```
 
 ## Resources
 
